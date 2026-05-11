@@ -19,6 +19,62 @@
 html,body{width:100%;height:100%;overflow:hidden;background:var(--dark);}
 body{font-family:'Montserrat',sans-serif;font-weight:300;color:var(--cream);}
 
+/* Risk slider styles */
+.risk-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 4px 0;
+}
+
+.risk-slider-container label {
+  flex: 1;
+  color: #000;
+  font-weight: 500;
+}
+
+.risk-slider {
+  flex: 2;
+  height: 6px;
+  background: #e0e0e0;
+  outline: none;
+  border-radius: 3px;
+  -webkit-appearance: none;
+}
+
+.risk-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #d4af5a;
+  cursor: pointer;
+  border: 2px solid #b8941e;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.risk-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #d4af5a;
+  cursor: pointer;
+  border: 2px solid #b8941e;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.slider-value {
+  min-width: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: #d4af5a;
+  font-weight: 600;
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 #stars{position:fixed;inset:0;z-index:0;pointer-events:none;}
 .star{position:absolute;border-radius:50%;background:#fff;animation:twinkle var(--d,3s) ease-in-out infinite var(--delay,0s);}
 @keyframes twinkle{0%,100%{opacity:var(--min,0.1)}50%{opacity:var(--max,0.8)}}
@@ -211,6 +267,7 @@ body{font-family:'Montserrat',sans-serif;font-weight:300;color:var(--cream);}
 <canvas id="canvas"></canvas>
 <div id="ui">
   <div class="header">
+    <button onclick="closeMiniApp()" style="position:absolute;left:15px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--gold-l);font-size:20px;cursor:pointer;padding:5px;" title="Закрыть">✕</button>
     <div class="logo-line1">Архив системных рисков</div>
     <div class="logo-count">500+ исследований</div>
   </div>
@@ -241,6 +298,14 @@ body{font-family:'Montserrat',sans-serif;font-weight:300;color:var(--cream);}
   <div id="above-globe">
     <div class="ag-label">Навигационная карта Архива</div>
     <div class="ag-sub">Нажмите на световой узел чтобы развернуть список материалов</div>
+    <div style="display: flex; gap: 12px; margin-top: 16px; justify-content: center;">
+      <button onclick="showFavorites()" style="background:none;border:none;cursor:pointer;padding:0;pointer-events:auto;" title="Личная библиотека">
+        <div style="font-family:'Montserrat',sans-serif;font-size:9px;color:var(--cyan);letter-spacing:0.12em;text-transform:uppercase;border:1px solid var(--cyan);padding:6px 12px;border-radius:2px;background:rgba(31,170,204,0.1);transition:background 0.3s ease;">Избранное</div>
+      </button>
+      <button onclick="showScenarios()" style="background:none;border:none;cursor:pointer;padding:0;pointer-events:auto;" title="Системное моделирование">
+        <div style="font-family:'Montserrat',sans-serif;font-size:9px;color:var(--gold-l);letter-spacing:0.12em;text-transform:uppercase;border:1px solid var(--gold-l);padding:6px 12px;border-radius:2px;background:rgba(212,175,90,0.1);transition:background 0.3s ease;">Системное моделирование</div>
+      </button>
+    </div>
   </div>
 
 </div>
@@ -1216,6 +1281,17 @@ window.addEventListener('mousemove',e=>{
 });
 
 window.addEventListener('touchmove',e=>{
+  // Check if panel is open and touch is within panel area
+  const panel = document.getElementById('panel');
+  if(panel && panel.classList.contains('open')) {
+    const rect = panel.getBoundingClientRect();
+    const touch = e.touches[0];
+    if(touch.clientX >= rect.left) {
+      // Touch is within panel, don't interfere with globe rotation
+      return;
+    }
+  }
+  
   if(dragging){
     rotY+=(e.touches[0].clientX-lastMX)*0.005;
     rotX+=(e.touches[0].clientY-lastMY)*0.005;
@@ -1226,6 +1302,17 @@ window.addEventListener('touchmove',e=>{
 
 window.addEventListener('mouseup',()=>{dragging=false;if(!hoveredId)setTimeout(()=>{autoRotate=true;},2500);});
 window.addEventListener('touchend',e=>{
+  const panel = document.getElementById('panel');
+  if(panel && panel.classList.contains('open')) {
+    const rect = panel.getBoundingClientRect();
+    const touch = e.changedTouches[0];
+    if(touch.clientX >= rect.left) {
+      // Touch ended within panel, don't trigger globe interactions
+      dragging = false;
+      return;
+    }
+  }
+  
   dragging=false;
   setTimeout(()=>{autoRotate=true;},3000);
   const rect=canvas.getBoundingClientRect();
@@ -1251,18 +1338,204 @@ if (window.Telegram?.WebApp) {
   tg.setBackgroundColor('#070605');
 }
 
+// User data management
+let userData = {
+  favorites: new Set(),
+  notes: {},
+  progress: {},
+  lastVisited: {},
+  scenarios: {}
+};
+
+// Load user data from Telegram storage
+async function loadUserData() {
+  if (tg && tg.CloudStorage) {
+    try {
+      const keys = ['favorites', 'notes', 'progress', 'lastVisited', 'scenarios'];
+      for (const key of keys) {
+        const value = await tg.CloudStorage.getItem(key);
+        if (value) {
+          if (key === 'favorites') {
+            userData.favorites = new Set(JSON.parse(value));
+          } else {
+            userData[key] = JSON.parse(value);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Storage access limited, using local storage');
+      loadLocalData();
+    }
+  } else {
+    loadLocalData();
+  }
+  updateFavoriteIcons();
+}
+
+// Save user data to Telegram storage
+async function saveUserData(key, value) {
+  if (tg && tg.CloudStorage) {
+    try {
+      let saveValue = value;
+      if (key === 'favorites') {
+        saveValue = JSON.stringify([...value]);
+      } else {
+        saveValue = JSON.stringify(value);
+      }
+      await tg.CloudStorage.setItem(key, saveValue);
+    } catch (e) {
+      saveLocalData(key, value);
+    }
+  } else {
+    saveLocalData(key, value);
+  }
+}
+
+// Fallback to localStorage
+function loadLocalData() {
+  const stored = localStorage.getItem('archiveUserData');
+  if (stored) {
+    const data = JSON.parse(stored);
+    userData.favorites = new Set(data.favorites || []);
+    userData.notes = data.notes || {};
+    userData.progress = data.progress || {};
+    userData.lastVisited = data.lastVisited || {};
+    userData.scenarios = data.scenarios || {};
+  }
+}
+
+function saveLocalData(key, value) {
+  let saveValue = value;
+  if (key === 'favorites') {
+    saveValue = [...value];
+  }
+  
+  const stored = JSON.parse(localStorage.getItem('archiveUserData') || '{}');
+  stored[key] = saveValue;
+  localStorage.setItem('archiveUserData', JSON.stringify(stored));
+}
+
+// Toggle favorite
+function toggleFavorite(topicId, title, sectionTitle) {
+  const id = `${sectionTitle}_${topicId}`;
+  if (userData.favorites.has(id)) {
+    userData.favorites.delete(id);
+  } else {
+    userData.favorites.add(id);
+    userData.notes[id] = userData.notes[id] || { title, section: sectionTitle, note: '', addedDate: new Date().toISOString() };
+  }
+  saveUserData('favorites', userData.favorites);
+  if (userData.notes[id]) saveUserData('notes', userData.notes);
+  updateFavoriteIcons();
+  // Refresh current panel if it's open
+  const currentPanel = document.getElementById('panel');
+  if (currentPanel.classList.contains('open')) {
+    const currentTitle = document.getElementById('pTitle').textContent;
+    if (currentTitle !== 'Личная библиотека') {
+      const section = SECTIONS.find(s => s.title === currentTitle);
+      if (section) openPanel(section);
+    }
+  }
+}
+
+// Add/edit note
+function editNote(topicId, sectionTitle) {
+  const id = `${sectionTitle}_${topicId}`;
+  const currentNote = userData.notes[id]?.note || '';
+  
+  const note = prompt('Добавьте заметку к материалу:', currentNote);
+  if (note !== null) {
+    if (!userData.notes[id]) {
+      userData.notes[id] = { title: '', section: sectionTitle, note: '', addedDate: new Date().toISOString() };
+    }
+    userData.notes[id].note = note;
+    userData.notes[id].editedDate = new Date().toISOString();
+    saveUserData('notes', userData.notes);
+    
+    // Refresh current panel
+    const currentPanel = document.getElementById('panel');
+    if (currentPanel.classList.contains('open')) {
+      const currentTitle = document.getElementById('pTitle').textContent;
+      if (currentTitle === 'Личная библиотека') {
+        showFavorites();
+      } else {
+        const section = SECTIONS.find(s => s.title === currentTitle);
+        if (section) openPanel(section);
+      }
+    }
+  }
+}
+
+// Mark as read/studied
+function markAsStudied(topicId, sectionTitle) {
+  const id = `${sectionTitle}_${topicId}`;
+  userData.progress[id] = {
+    studied: true,
+    date: new Date().toISOString()
+  };
+  saveUserData('progress', userData.progress);
+}
+
+// Update favorite icons in UI
+function updateFavoriteIcons() {
+  // This will be called when panels are opened
+}
+
+function updateProgressIcons() {
+  updateFavoriteIcons(); // They're handled together
+}
+
 function openPanel(sec){
-  // В Telegram - показать панель с кнопками перехода к постам
+  // Update last visited
+  userData.lastVisited[sec.title] = new Date().toISOString();
+  saveUserData('lastVisited', userData.lastVisited);
+  
   document.getElementById('pNum').textContent=sec.num;
   document.getElementById('pTitle').textContent=sec.title;
   document.getElementById('pSub').textContent=sec.sub;
   document.getElementById('pAccent').style.color=sec.color;
-  document.getElementById('pBody').innerHTML=sec.topics.map(t=>`
-    <div class="topic-row" ${t.url?`onclick="openTelegramLink('${t.url}')"`:''} style="${t.url?'cursor:pointer':''}">
-      <span class="t-num">${t.n}</span>
-      <span class="t-text">${t.t}</span>
-      ${t.url?'<span class="t-link">↗</span>':''}
-    </div>`).join('');
+  
+  const panelContent = `
+    <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid #ddd; color: #000;">
+      ${sec.topics.map(t=>{
+        const topicId = t.n;
+        const id = `${sec.title}_${topicId}`;
+        const isFavorite = userData.favorites.has(id);
+        const hasNote = userData.notes[id]?.note;
+        const isStudied = userData.progress[id]?.studied;
+        
+        let icons = '';
+        if (isFavorite) icons += '<span style="color: #FFD700; margin-left: 6px; font-size: 16px;">🔖</span>';
+        if (hasNote) icons += '<span style="color: #666; margin-left: 4px; font-size: 16px;">📄</span>';
+        if (isStudied) icons += '<span style="color: #22BB66; margin-left: 4px; font-size: 16px;">✓</span>';
+        
+        return `
+        <div class="topic-row" data-topic-id="${topicId}" data-section="${sec.title}" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee;">
+          <div ${t.url?`onclick="openTelegramLink('${t.url}'); markAsStudied('${topicId}', '${sec.title}')"`:''} 
+               style="${t.url?'cursor:pointer; flex: 1;':'flex: 1;'} display: flex; align-items: center;">
+            <span class="t-num" style="min-width: 40px; font-size: 12px; color: #666; font-weight: 500;">${t.n}</span>
+            <span class="t-text" style="flex: 1; font-size: 13px; line-height: 1.4; color: #000;">${t.t}</span>
+            ${icons}
+            ${t.url?'<span class="t-link" style="margin-left: 10px; color: #1faac4; font-size: 14px;">↗</span>':''}
+          </div>
+          <div class="topic-controls" style="display: flex; gap: 8px; margin-left: 12px; flex-shrink: 0;">
+            <button onclick="toggleFavorite('${topicId}', '${t.t.replace(/'/g, "\\'")}', '${sec.title}')" 
+                    style="background: #f5f5f5; border: 1px solid #ddd; font-size: 16px; cursor: pointer; padding: 6px 8px; border-radius: 4px; color: ${isFavorite ? '#FFD700' : '#999'};"
+                    title="${isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}">
+              🔖
+            </button>
+            <button onclick="editNote('${topicId}', '${sec.title}')" 
+                    style="background: #f5f5f5; border: 1px solid #ddd; font-size: 16px; cursor: pointer; padding: 6px 8px; border-radius: 4px; color: ${hasNote ? '#666' : '#999'};"
+                    title="Добавить заметку">
+              📄
+            </button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+  
+  document.getElementById('pBody').innerHTML = panelContent;
   document.getElementById('panel').classList.add('open');
   document.getElementById('above-globe').classList.add('hidden');
   autoRotate=false;
@@ -1283,6 +1556,609 @@ function closePanel(){
   document.getElementById('above-globe').classList.remove('hidden');
   setTimeout(()=>{autoRotate=true;},1000);
 }
+
+function showFavorites(){
+  // Создаём панель избранного
+  const favoritesArray = [...userData.favorites];
+  const totalFavorites = favoritesArray.length;
+  const totalStudied = Object.keys(userData.progress).filter(id => userData.progress[id].studied).length;
+  
+  let favoritesHtml = '';
+  if (totalFavorites === 0) {
+    favoritesHtml = `
+      <div style="background: white; border-radius: 8px; padding: 20px; text-align: center; border: 1px solid #ddd; color: #000;">
+        <div style="color: #666; font-size: 13px; line-height: 1.4;">
+          Пока нет избранных материалов.<br><br>
+          Нажмите 🔖 рядом с материалом, чтобы добавить его в избранное.
+        </div>
+      </div>
+    `;
+  } else {
+    favoritesHtml = `<div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid #ddd; color: #000;">`;
+    favoritesHtml += favoritesArray.map(id => {
+      const noteData = userData.notes[id];
+      if (!noteData) return '';
+      
+      const isStudied = userData.progress[id]?.studied;
+      const hasNote = noteData.note && noteData.note.trim();
+      
+      return `
+        <div class="favorite-item" style="border-bottom: 1px solid #eee; padding: 14px 0; color: #000;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div style="flex: 1;">
+              <div style="font-size: 12px; color: #d4af5a; margin-bottom: 4px; font-weight: 500;">${noteData.section}</div>
+              <div style="color: #000; margin-bottom: 8px; line-height: 1.4; font-size: 13px; font-weight: 500;">${noteData.title}</div>
+              ${hasNote ? `<div style="font-size: 12px; color: #333; font-style: italic; margin-bottom: 8px; padding: 8px 10px; background: #f8f9fa; border-radius: 6px; border-left: 3px solid #1faac4;">"${noteData.note}"</div>` : ''}
+              <div style="font-size: 11px; color: #666;">
+                Добавлено: ${new Date(noteData.addedDate).toLocaleDateString()}
+                ${isStudied ? ' • <span style="color: #1faac4; font-weight: 500;">Изучено ✓</span>' : ''}
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; margin-left: 12px;">
+              <button onclick="editNote('${id.split('_')[1]}', '${noteData.section}')" 
+                      style="background: #f5f5f5; border: 1px solid #ddd; color: #d4af5a; cursor: pointer; font-size: 16px; padding: 6px 8px; border-radius: 4px;" title="Редактировать заметку">📄</button>
+              <button onclick="removeFavorite('${id}')" 
+                      style="background: #f5f5f5; border: 1px solid #ddd; color: #ff6b6b; cursor: pointer; font-size: 16px; padding: 6px 8px; border-radius: 4px;" title="Удалить из избранного">🗑️</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).filter(item => item).join('');
+    favoritesHtml += '</div>';
+  }
+
+  document.getElementById('pNum').textContent='🔖';
+  document.getElementById('pTitle').textContent='Личная библиотека';
+  document.getElementById('pSub').textContent=`${totalFavorites} избранных • ${totalStudied} изучено`;
+  document.getElementById('pAccent').style.color='#1faac4';
+  
+  const statsHtml = `
+    <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid #ddd; color: #000;">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span style="color: #1faac4; font-weight: 600; font-size: 14px;">Ваш прогресс изучения</span>
+      </div>
+      <div style="display: flex; gap: 20px; font-size: 12px; color: #000;">
+        <div>🔖 Избранное: <strong style="color: #d4af5a;">${totalFavorites}</strong></div>
+        <div>✓ Изучено: <strong style="color: #1faac4;">${totalStudied}</strong></div>
+        <div>📄 С заметками: <strong>${Object.keys(userData.notes).filter(id => userData.notes[id].note).length}</strong></div>
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('pBody').innerHTML = statsHtml + favoritesHtml;
+  document.getElementById('panel').classList.add('open');
+  document.getElementById('above-globe').classList.add('hidden');
+  autoRotate=false;
+}
+
+function removeFavorite(id) {
+  userData.favorites.delete(id);
+  saveUserData('favorites', userData.favorites);
+  showFavorites(); // Refresh the favorites panel
+}
+
+function closeMiniApp(){
+  if (tg) {
+    // Закрыть Mini App через Telegram API
+    tg.close();
+  } else {
+    // Fallback для браузера
+    window.close();
+  }
+}
+
+function showScenarios(){
+  document.getElementById('pNum').textContent='⚡';
+  document.getElementById('pTitle').textContent='Системное моделирование';
+  document.getElementById('pSub').textContent='Interactive foresight simulator • Горизонт 2026-2050';
+  document.getElementById('pAccent').style.color='var(--gold-l)';
+  
+  const savedScenarios = Object.keys(userData.scenarios).length;
+  
+  const scenarioHtml = `
+    <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid #ddd; color: #000;">
+      <div style="color: #d4af5a; font-weight: 600; margin-bottom: 8px; font-size: 14px;">Strategic Foresight Platform</div>
+      <div style="font-size: 13px; line-height: 1.4; color: #000;">
+        Настройте параметры системных факторов для моделирования вероятных траекторий глобального развития на основе методологии ведущих think tank.
+      </div>
+      <div style="font-size: 11px; color: #666; margin-top: 8px;">
+        Сохранённых моделей: <strong>${savedScenarios}</strong>
+      </div>
+    </div>
+
+    <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 20px; border: 1px solid #ddd; color: #000;">
+      <div style="color: #1faac4; font-size: 15px; margin-bottom: 12px; font-weight: 600;">Глобальные системные риски:</div>
+      
+      <div class="risk-category" style="margin-bottom: 14px;">
+        <div style="font-size: 13px; color: #d4af5a; margin-bottom: 8px; font-weight: 600;">Социальные риски</div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Ухудшение здоровья и благополучия:</label>
+          <input type="range" id="social-health" min="0" max="10" value="5" class="risk-slider">
+          <span class="slider-value">5</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Неравенство (богатство, доход):</label>
+          <input type="range" id="social-inequality" min="0" max="10" value="6" class="risk-slider">
+          <span class="slider-value">6</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Социальная поляризация:</label>
+          <input type="range" id="social-polarization" min="0" max="10" value="7" class="risk-slider">
+          <span class="slider-value">7</span>
+        </div>
+      </div>
+
+      <div class="risk-category" style="margin-bottom: 14px;">
+        <div style="font-size: 13px; color: #d4af5a; margin-bottom: 8px; font-weight: 600;">Климатические риски</div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Экстремальные погодные явления:</label>
+          <input type="range" id="climate-extreme" min="0" max="10" value="7" class="risk-slider">
+          <span class="slider-value">7</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Утрата биоразнообразия:</label>
+          <input type="range" id="climate-biodiversity" min="0" max="10" value="6" class="risk-slider">
+          <span class="slider-value">6</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Нехватка природных ресурсов:</label>
+          <input type="range" id="climate-resources" min="0" max="10" value="5" class="risk-slider">
+          <span class="slider-value">5</span>
+        </div>
+      </div>
+
+      <div class="risk-category" style="margin-bottom: 14px;">
+        <div style="font-size: 13px; color: #d4af5a; margin-bottom: 8px; font-weight: 600;">Экономические риски</div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Пузырь активов:</label>
+          <input type="range" id="econ-bubble" min="0" max="10" value="6" class="risk-slider">
+          <span class="slider-value">6</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Долговые кризисы:</label>
+          <input type="range" id="econ-debt" min="0" max="10" value="5" class="risk-slider">
+          <span class="slider-value">5</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Сбои цепочек поставок:</label>
+          <input type="range" id="econ-supply" min="0" max="10" value="4" class="risk-slider">
+          <span class="slider-value">4</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Инфляция:</label>
+          <input type="range" id="econ-inflation" min="0" max="10" value="6" class="risk-slider">
+          <span class="slider-value">6</span>
+        </div>
+      </div>
+
+      <div class="risk-category" style="margin-bottom: 14px;">
+        <div style="font-size: 13px; color: #d4af5a; margin-bottom: 8px; font-weight: 600;">Технологические риски</div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Неблагоприятные последствия ИИ:</label>
+          <input type="range" id="tech-ai" min="0" max="10" value="6" class="risk-slider">
+          <span class="slider-value">6</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Кибершпионаж и кибервойна:</label>
+          <input type="range" id="tech-cyber" min="0" max="10" value="7" class="risk-slider">
+          <span class="slider-value">7</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Дезинформация:</label>
+          <input type="range" id="tech-disinfo" min="0" max="10" value="8" class="risk-slider">
+          <span class="slider-value">8</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Цензура и слежка:</label>
+          <input type="range" id="tech-surveillance" min="0" max="10" value="5" class="risk-slider">
+          <span class="slider-value">5</span>
+        </div>
+      </div>
+
+      <div class="risk-category" style="margin-bottom: 14px;">
+        <div style="font-size: 13px; color: #d4af5a; margin-bottom: 8px; font-weight: 600;">Геополитические риски</div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Вооруженные конфликты:</label>
+          <input type="range" id="geo-conflicts" min="0" max="10" value="7" class="risk-slider">
+          <span class="slider-value">7</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Внутригосударственное насилие:</label>
+          <input type="range" id="geo-violence" min="0" max="10" value="5" class="risk-slider">
+          <span class="slider-value">5</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Геоэкономическая конфронтация:</label>
+          <input type="range" id="geo-economic" min="0" max="10" value="6" class="risk-slider">
+          <span class="slider-value">6</span>
+        </div>
+        <div class="risk-slider-container">
+          <label style="font-size: 12px; color: #000;">Биологические/химические/ядерные угрозы:</label>
+          <input type="range" id="geo-wmd" min="0" max="10" value="3" class="risk-slider">
+          <span class="slider-value">3</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+      <button onclick="calculateScenario()" style="flex: 1; background: #1faac4; color: white; border: none; padding: 12px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500;">Моделировать траектории</button>
+      <button onclick="saveCurrentScenario()" style="flex: 1; background: #d4af5a; color: white; border: none; padding: 12px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500;">Сохранить модель</button>
+    </div>
+
+    <div id="scenario-result" style="min-height: 60px; background: white; border-radius: 8px; padding: 16px; border: 1px solid #ddd; color: #000;">
+      <div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">
+        Настройте системные факторы и нажмите "Моделировать траектории" для получения foresight-анализа
+      </div>
+    </div>
+
+    ${savedScenarios > 0 ? `
+    <div style="margin-top: 16px; background: white; border-radius: 8px; padding: 16px; border: 1px solid #ddd; color: #000;">
+      <div style="color: #d4af5a; font-size: 13px; margin-bottom: 8px; font-weight: 600;">Сохранённые сценарии:</div>
+      <div id="saved-scenarios">
+        ${Object.keys(userData.scenarios).map(id => {
+          const scenario = userData.scenarios[id];
+          return `
+            <div style="background: #f5f5f5; padding: 10px; margin-bottom: 8px; border-radius: 6px; font-size: 12px; color: #000;">
+              <div style="font-weight: 500; color: #000; margin-bottom: 4px;">${scenario.name}</div>
+              <div style="font-size: 11px; color: #666;">${scenario.date} • ${scenario.outcome}</div>
+              <button onclick="loadScenario('${id}')" style="background: none; border: 1px solid #d4af5a; color: #d4af5a; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; margin-top: 6px; font-weight: 500;">Загрузить</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+    ` : ''}
+  `;
+  
+  document.getElementById('pBody').innerHTML = scenarioHtml;
+  
+  // Add slider listeners
+  setTimeout(() => {
+    document.querySelectorAll('.risk-slider').forEach(slider => {
+      slider.addEventListener('input', function() {
+        const valueSpan = this.nextElementSibling;
+        valueSpan.textContent = this.value;
+      });
+    });
+  }, 100);
+  
+  document.getElementById('panel').classList.add('open');
+  document.getElementById('above-globe').classList.add('hidden');
+  autoRotate=false;
+}
+
+function calculateScenario() {
+  // Collect all risk factor values using comprehensive structure
+  const factors = {
+    // Social risks
+    socialHealth: parseInt(document.getElementById('social-health').value),
+    socialInequality: parseInt(document.getElementById('social-inequality').value),
+    socialPolarization: parseInt(document.getElementById('social-polarization').value),
+    // Climate risks
+    climateExtreme: parseInt(document.getElementById('climate-extreme').value),
+    climateBiodiversity: parseInt(document.getElementById('climate-biodiversity').value),
+    climateResources: parseInt(document.getElementById('climate-resources').value),
+    // Economic risks
+    econBubble: parseInt(document.getElementById('econ-bubble').value),
+    econDebt: parseInt(document.getElementById('econ-debt').value),
+    econSupply: parseInt(document.getElementById('econ-supply').value),
+    econInflation: parseInt(document.getElementById('econ-inflation').value),
+    // Technology risks
+    techAI: parseInt(document.getElementById('tech-ai').value),
+    techCyber: parseInt(document.getElementById('tech-cyber').value),
+    techDisinfo: parseInt(document.getElementById('tech-disinfo').value),
+    techSurveillance: parseInt(document.getElementById('tech-surveillance').value),
+    // Geopolitical risks
+    geoConflicts: parseInt(document.getElementById('geo-conflicts').value),
+    geoViolence: parseInt(document.getElementById('geo-violence').value),
+    geoEconomic: parseInt(document.getElementById('geo-economic').value),
+    geoWMD: parseInt(document.getElementById('geo-wmd').value)
+  };
+  
+  // Calculate weighted scenario outcome based on comprehensive risk analysis
+  const socialRisk = (factors.socialHealth + factors.socialInequality + factors.socialPolarization) / 3;
+  const climateRisk = (factors.climateExtreme + factors.climateBiodiversity + factors.climateResources) / 3;
+  const econRisk = (factors.econBubble + factors.econDebt + factors.econSupply + factors.econInflation) / 4;
+  const techRisk = (factors.techAI + factors.techCyber + factors.techDisinfo + factors.techSurveillance) / 4;
+  const geoRisk = (factors.geoConflicts + factors.geoViolence + factors.geoEconomic + factors.geoWMD) / 4;
+  
+  // Weighted calculation considering systemic interconnections
+  const weightedRisk = (
+    socialRisk * 0.25 +      // Social risks are fundamental
+    climateRisk * 0.20 +     // Climate creates cascading effects  
+    econRisk * 0.20 +        // Economic stability affects all sectors
+    techRisk * 0.20 +        // Technology amplifies other risks
+    geoRisk * 0.15           // Geopolitical risks create instability
+  );
+  
+  let scenarioType, scenarioIcon, probability, timeframe, description, keyDrivers, weakSignals, cascadingEffects, resilienceIndex;
+  
+  if (weightedRisk <= 3.5) {
+    scenarioType = "Адаптивный мир";
+    scenarioIcon = "🟢";
+    probability = "Доминирующий сценарий";
+    timeframe = "2026-2040";
+    
+    description = "Системы адаптации эффективно справляются с глобальными вызовами. Международное сотрудничество укрепляется, технологические решения масштабируются, социальные институты трансформируются устойчивым образом. Превентивные меры предотвращают каскадные сбои.";
+    
+    keyDrivers = "Технологические прорывы в устойчивых решениях • Укрепление многополярного сотрудничества • Эффективная климатическая адаптация • Социальная инклюзивность • Цифровая трансформация институтов";
+    
+    weakSignals = "Рост ESG-инвестиций • Международные климатические альянсы • Цифровые валюты центробанков • Превентивная дипломатия • Устойчивые цепочки поставок";
+    
+    cascadingEffects = "Технологическая стабильность → укрепление доверия к институтам → рост международного сотрудничества → эффективное управление рисками → повышение глобальной устойчивости";
+    
+    resilienceIndex = {
+      financial: 78, energy: 82, information: 74, social: 85, geographic: 76
+    };
+    
+  } else if (weightedRisk <= 6.5) {
+    scenarioType = "Фрагментированный мир";  
+    scenarioIcon = "🟡";
+    probability = "Вероятный сценарий";
+    timeframe = "2026-2040";
+    
+    description = "Формирование региональных блоков с ограниченным глобальным сотрудничеством. Деглобализация ускоряется, растёт геоэкономическая конкуренция. Адаптационные механизмы работают на региональном уровне, но глобальные вызовы решаются фрагментарно.";
+    
+    keyDrivers = "Геоэкономическая блокизация • Деглобализация цепочек поставок • Климатическая миграция • Эрозия многосторонних институтов • Цифровой суверенитет • Региональные валютные системы";
+    
+    weakSignals = "Рост торговых ограничений • Локализация производства • Усиление пограничного контроля • Региональные технологические стандарты • Волатильность продовольственных рынков";
+    
+    cascadingEffects = "Торговые войны → нарушение глобальных цепочек → региональная автаркия → снижение глобального сотрудничества → фрагментация ответов на климатические вызовы";
+    
+    resilienceIndex = {
+      financial: 58, energy: 52, information: 48, social: 55, geographic: 61
+    };
+    
+  } else {
+    scenarioType = "Системный кризис";
+    scenarioIcon = "🔴";
+    probability = "Стресс-сценарий";
+    timeframe = "2026-2035";
+    
+    description = "Множественные системные сбои создают каскадные эффекты глобального масштаба. Адаптационные механизмы перегружены, институциональное доверие критически подорвано. Возникновение альтернативных форм управления и социальной организации.";
+    
+    keyDrivers = "Климатические переломные точки • Коллапс глобального управления • Массовая технологическая дезинформация • Социальная поляризация • Финансовая нестабильность • Ресурсные конфликты";
+    
+    weakSignals = "Критический рост страховых убытков • Массовые кибератаки на инфраструктуру • Волны климатических беженцев • Эрозия демократических институтов • Валютные кризисы";
+    
+    cascadingEffects = "Климатические катастрофы → массовая миграция → социальная дестабилизация → политическая поляризация → институциональный коллапс → снижение способности к координированным ответам";
+    
+    resilienceIndex = {
+      financial: 28, energy: 32, information: 25, social: 31, geographic: 38
+    };
+  }
+  
+  const resultHtml = `
+    <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #ddd; color: #000;">
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span style="font-size: 20px;">${scenarioIcon}</span>
+          <span style="color: #1faac4; font-weight: 600; font-size: 15px;">Моделируемая траектория:</span>
+          <span style="color: #d4af5a; font-weight: 700; font-size: 15px;">${scenarioType}</span>
+        </div>
+        <div style="display: flex; gap: 20px; font-size: 11px; color: #666;">
+          <div><strong>Статус:</strong> ${probability}</div>
+          <div><strong>Временной горизонт:</strong> ${timeframe}</div>
+          <div><strong>Индекс системного риска:</strong> ${weightedRisk.toFixed(1)}/10</div>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 14px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 6px; font-weight: 600;">Системная динамика:</div>
+        <div style="font-size: 11px; line-height: 1.4; color: #000; margin-bottom: 8px;">${description}</div>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 10px; color: #666;">
+          <div>Социальные: ${socialRisk.toFixed(1)}</div>
+          <div>Климатические: ${climateRisk.toFixed(1)}</div>
+          <div>Экономические: ${econRisk.toFixed(1)}</div>
+          <div>Технологические: ${techRisk.toFixed(1)}</div>
+          <div>Геополитические: ${geoRisk.toFixed(1)}</div>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 14px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 6px; font-weight: 600;">Ключевые драйверы:</div>
+        <div style="font-size: 11px; line-height: 1.4; color: #000;">${keyDrivers}</div>
+      </div>
+      
+      <div style="margin-bottom: 14px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 6px; font-weight: 600;">Слабые сигналы:</div>
+        <div style="font-size: 11px; line-height: 1.4; color: #000; font-style: italic;">${weakSignals}</div>
+      </div>
+      
+      <div style="margin-bottom: 14px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 6px; font-weight: 600;">Каскадные эффекты:</div>
+        <div style="font-size: 11px; line-height: 1.4; color: #000; background: #f8f9fa; padding: 8px; border-radius: 4px; border-left: 3px solid #1faac4;">${cascadingEffects}</div>
+      </div>
+      
+      <div style="margin-bottom: 12px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 8px; font-weight: 600;">Карта устойчивости:</div>
+        <div style="display: grid; gap: 6px; font-size: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Финансовая устойчивость:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div style="width: 60px; height: 4px; background: #eee; border-radius: 2px; overflow: hidden;">
+                <div style="width: ${resilienceIndex.financial}%; height: 100%; background: ${resilienceIndex.financial > 60 ? '#22BB66' : resilienceIndex.financial > 40 ? '#FFD700' : '#ff6b6b'};"></div>
+              </div>
+              <span style="font-weight: 500; min-width: 30px;">${resilienceIndex.financial}%</span>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Энергетическая устойчивость:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div style="width: 60px; height: 4px; background: #eee; border-radius: 2px; overflow: hidden;">
+                <div style="width: ${resilienceIndex.energy}%; height: 100%; background: ${resilienceIndex.energy > 60 ? '#22BB66' : resilienceIndex.energy > 40 ? '#FFD700' : '#ff6b6b'};"></div>
+              </div>
+              <span style="font-weight: 500; min-width: 30px;">${resilienceIndex.energy}%</span>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Информационная устойчивость:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div style="width: 60px; height: 4px; background: #eee; border-radius: 2px; overflow: hidden;">
+                <div style="width: ${resilienceIndex.information}%; height: 100%; background: ${resilienceIndex.information > 60 ? '#22BB66' : resilienceIndex.information > 40 ? '#FFD700' : '#ff6b6b'};"></div>
+              </div>
+              <span style="font-weight: 500; min-width: 30px;">${resilienceIndex.information}%</span>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Социальная устойчивость:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div style="width: 60px; height: 4px; background: #eee; border-radius: 2px; overflow: hidden;">
+                <div style="width: ${resilienceIndex.social}%; height: 100%; background: ${resilienceIndex.social > 60 ? '#22BB66' : resilienceIndex.social > 40 ? '#FFD700' : '#ff6b6b'};"></div>
+              </div>
+              <span style="font-weight: 500; min-width: 30px;">${resilienceIndex.social}%</span>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Географическая устойчивость:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div style="width: 60px; height: 4px; background: #eee; border-radius: 2px; overflow: hidden;">
+                <div style="width: ${resilienceIndex.geographic}%; height: 100%; background: ${resilienceIndex.geographic > 60 ? '#22BB66' : resilienceIndex.geographic > 40 ? '#FFD700' : '#ff6b6b'};"></div>
+              </div>
+              <span style="font-weight: 500; min-width: 30px;">${resilienceIndex.geographic}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div style="font-size: 9px; color: #666; text-align: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid #ddd; font-weight: 400;">
+        Системная foresight-модель • Методология Global Risks • ${new Date().toLocaleDateString()}
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('scenario-result').innerHTML = resultHtml;
+  
+  // Store current scenario for saving
+  window.currentScenario = {
+    factors: factors,
+    result: {
+      type: scenarioType,
+      icon: scenarioIcon,
+      probability: probability,
+      timeframe: timeframe,
+      riskIndex: weightedRisk.toFixed(1),
+      description: description,
+      keyDrivers: keyDrivers,
+      weakSignals: weakSignals,
+      cascadingEffects: cascadingEffects,
+      resilienceIndex: resilienceIndex,
+      categoryRisks: {
+        social: socialRisk.toFixed(1),
+        climate: climateRisk.toFixed(1),
+        economic: econRisk.toFixed(1),
+        technology: techRisk.toFixed(1),
+        geopolitical: geoRisk.toFixed(1)
+      }
+    }
+  };
+}
+
+function saveCurrentScenario() {
+  if (!window.currentScenario) {
+    alert('Сначала рассчитайте сценарий');
+    return;
+  }
+  
+  const name = prompt('Название сценария:', `Сценарий ${Object.keys(userData.scenarios).length + 1}`);
+  if (!name) return;
+  
+  const id = Date.now().toString();
+  userData.scenarios[id] = {
+    name: name,
+    date: new Date().toLocaleDateString(),
+    factors: window.currentScenario.factors,
+    result: window.currentScenario.result,
+    outcome: window.currentScenario.result.type
+  };
+  
+  saveUserData('scenarios', userData.scenarios);
+  showScenarios(); // Refresh the panel
+}
+
+function loadScenario(id) {
+  const scenario = userData.scenarios[id];
+  if (!scenario) return;
+  
+  // Load factor values into sliders
+  Object.keys(scenario.factors).forEach(key => {
+    const elementId = key.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
+    const slider = document.getElementById(elementId);
+    if (slider) {
+      slider.value = scenario.factors[key];
+      const valueSpan = slider.nextElementSibling;
+      if (valueSpan) valueSpan.textContent = scenario.factors[key];
+    }
+  });
+  
+  // Store loaded scenario
+  window.currentScenario = {
+    factors: scenario.factors,
+    result: scenario.result
+  };
+  
+  // Display result
+  const resultHtml = `
+    <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #ddd; color: #000;">
+      <div style="margin-bottom: 12px;">
+        <div style="color: #1faac4; font-weight: 600; margin-bottom: 6px; font-size: 13px;">Загруженный сценарий: <span style="color: #d4af5a; font-weight: 700;">${scenario.result.type}</span></div>
+        <div style="font-size: 12px; margin-bottom: 4px; color: #000; font-weight: 500;"><strong>Вероятность:</strong> ${scenario.result.probability}</div>
+        <div style="font-size: 12px; margin-bottom: 4px; color: #000; font-weight: 500;"><strong>Временные рамки:</strong> ${scenario.result.timeframe}</div>
+        <div style="font-size: 12px; margin-bottom: 8px; color: #000; font-weight: 500;"><strong>Риск-индекс:</strong> ${scenario.result.riskIndex}/10</div>
+      </div>
+      
+      <div style="margin-bottom: 12px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 4px; font-weight: 600;">Описание сценария:</div>
+        <div style="font-size: 11px; line-height: 1.4; margin-bottom: 8px; color: #000; font-weight: 400;">${scenario.result.description || 'Описание недоступно'}</div>
+      </div>
+      
+      <div style="margin-bottom: 12px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 4px; font-weight: 600;">Системная оценка:</div>
+        <div style="font-size: 11px; line-height: 1.4; margin-bottom: 8px; color: #000; font-weight: 400; font-style: italic;">${scenario.result.systemicAssessment || scenario.result.keyFactors || 'Оценка недоступна'}</div>
+      </div>
+      
+      <div style="margin-bottom: 8px;">
+        <div style="color: #d4af5a; font-size: 12px; margin-bottom: 4px; font-weight: 600;">Стратегические приоритеты:</div>
+        <div style="font-size: 11px; line-height: 1.4; color: #000; font-weight: 400;">${scenario.result.strategicPriorities || scenario.result.actions || 'Приоритеты недоступны'}</div>
+      </div>
+      
+      <div style="font-size: 9px; color: #666; text-align: center; margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-weight: 400;">
+        Сценарий "${scenario.name}" • Создан: ${scenario.date}
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('scenario-result').innerHTML = resultHtml;
+}
+
+// Initialize user data when app loads
+document.addEventListener('DOMContentLoaded', loadUserData);
+
+// Prevent automatic panel switching by blocking unwanted scroll behaviors
+document.addEventListener('DOMContentLoaded', function() {
+  const panel = document.getElementById('panel');
+  const panelBody = document.querySelector('.panel-body') || panel;
+  
+  // Prevent panel switching on overscroll
+  if (panel) {
+    panel.addEventListener('wheel', function(e) {
+      e.stopPropagation();
+    }, { passive: false });
+    
+    panel.addEventListener('touchstart', function(e) {
+      e.stopPropagation();
+    }, { passive: false });
+    
+    panel.addEventListener('touchmove', function(e) {
+      e.stopPropagation();
+    }, { passive: false });
+    
+    panel.addEventListener('touchend', function(e) {
+      e.stopPropagation();
+    }, { passive: false });
+  }
+});
+
 </script>
 </body>
 </html>
